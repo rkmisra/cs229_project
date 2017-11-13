@@ -1,9 +1,20 @@
 function [theta] = main()
   [X_train,Y_train,X_test,Y_test] = load_planets_data('../data/habitable_planets_detailed_list.csv','../data/non_habitable_planets_confirmed_detailed_list.csv','../data/feature_index.csv');
-%  [error] = logistic_regression(X_train,Y_train, X_test, Y_test);
+  %[error] = logistic_regression(X_train,Y_train, X_test, Y_test);
   [error] = svm(X_train,Y_train, X_test, Y_test);
-  
-  fprintf('error is %d  \n', error);
+
+  fprintf('Test set error is %d  \n', error*100);
+  fflush(stdout);
+
+
+  [error] = svm(X_train,Y_train, X_train, Y_train);
+
+  fprintf('Training error is %d  \n', error*100);
+  fflush(stdout);
+
+  [error] = svm(X_train,Y_train, [X_train; X_test], [Y_train; Y_test]);
+
+  fprintf('Whole data error is %d  \n', error*100);
   fflush(stdout);
   
 end
@@ -19,41 +30,49 @@ function[X_train, Y_train, X_test, Y_test] = load_planets_data(habitable_planets
   habitable_train_size = floor(size(habitable, 1) * training_percentage);
   non_habitable_train_size = floor(size(non_habitable, 1) * training_percentage);
   
+  %non_habitable_train_size =100;
+  
   habitable_train = habitable(1:habitable_train_size,:);
   habitable_test = habitable(habitable_train_size+1:end,:);
   non_habitable_train = non_habitable (1:non_habitable_train_size,:);
   non_habitable_test = non_habitable (non_habitable_train_size+1:end,:);
+  %non_habitable_test = non_habitable (non_habitable_train_size+1:non_habitable_train_size+200,:);
   
   % now select only relevant features
   habitable_train_features = ones(habitable_train_size,1);
   habitable_test_features = ones(size(habitable,1)-habitable_train_size,1);
   non_habitable_train_features = -ones(non_habitable_train_size,1);
   non_habitable_test_features = -ones(size(non_habitable,1)-non_habitable_train_size,1);
+  %non_habitable_test_features = -ones(200,1);
   for index = features_index
-    %habitable_train_features = [habitable_train_features , habitable_train(:,index)];
-    %habitable_test_features = [habitable_test_features , habitable_test(:,index)];
-    %non_habitable_train_features = [non_habitable_train_features , non_habitable_train(:,index)];
-    %non_habitable_test_features = [non_habitable_test_features , non_habitable_test(:,index)];
+    habitable_train_features = [habitable_train_features , habitable_train(:,index)];
+    habitable_test_features = [habitable_test_features , habitable_test(:,index)];
+    non_habitable_train_features = [non_habitable_train_features , non_habitable_train(:,index)];
+    non_habitable_test_features = [non_habitable_test_features , non_habitable_test(:,index)];
   end
-  %select all features
-  habitable_train_features = [habitable_train_features , habitable_train];
-  habitable_test_features = [habitable_test_features , habitable_test];
-  non_habitable_train_features = [non_habitable_train_features , non_habitable_train];
-  non_habitable_test_features = [non_habitable_test_features , non_habitable_test];
   
   %merge both training samples
   training_data = [habitable_train_features ; non_habitable_train_features];
   test_data = [habitable_test_features;non_habitable_test_features];
   
   %adding intercept too
-  X_train = [ones(size(training_data,1), 1),training_data(:,2:end)];
+  %X_train = [ones(size(training_data,1), 1),training_data(:,2:end)];
+  X_train = [training_data(:,2:end)];
   Y_train = training_data(:,1);
-  X_test = [ones(size(test_data,1), 1),test_data(:,2:end)];
+  
+  dlmwrite('train_data.txt', training_data, ' ');
+  dlmwrite('test_data.txt',test_data, ' ');
+  
+  %X_test = [ones(size(test_data,1), 1),test_data(:,2:end)];
+  X_test = [test_data(:,2:end)];
   Y_test = test_data(:,1);
 
+  %libsvmwrite('train_data.txt', Y_train, X_train);
+  %libsvmwrite('test_data.txt', Y_test , X_test);
+  
 end
 
-function[error] = logistic_regression(X, Y, X_test, Ytest)
+function[error] = logistic_regression(X, Y, X_test, Y_test)
   theta = zeros(size(X, 2), 1);
   learning_rate = 0.01;
   for i = 1:10^7
@@ -148,7 +167,5 @@ function[test_error] = svm_test(m_train, Xtrain, squared_X_train, avg_alpha, tau
   %         sum(preds .* ytest <= 0) / length(ytest));
 
   preds = Ktest * avg_alpha;
-  fprintf(1, 'Test error rate for average alpha: %1.4f\n', ...
-          sum(preds .* ytest <= 0) / length(ytest));
   test_error = sum(preds .* ytest <= 0) / length(ytest);
 end
