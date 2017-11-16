@@ -10,6 +10,7 @@ from sklearn import svm
 
 TRAIN_DATA = 0.5;
 DEV_DATA = 0.2;
+BEST_FEATURE_SELECTION_LOOP_COUNT=30;
 
 #Index is 0 based
 
@@ -113,7 +114,6 @@ def forward_search_features (habitable, non_habitable, train_slice, dev_slice):
         selected_features.add(min_index);
         previous_min_error = min_error;
     
-    print('Selected features = ', selected_features, ' with min error ', previous_min_error);
     return selected_features;
 
 def load_planets_data():
@@ -126,13 +126,37 @@ def load_planets_data():
 
     return habitable_planets, non_habitable_planets;
 
+def find_best_features():
+    try:
+        print("Selecting best features");
+        dictionary_of_features = dict();
+        habitable_planets , non_habitable_planets = load_planets_data(); 
+        for j in range(BEST_FEATURE_SELECTION_LOOP_COUNT):
+            np.random.shuffle(habitable_planets);
+            np.random.shuffle(non_habitable_planets);        
+            selected_features = forward_search_features(habitable_planets, non_habitable_planets, TRAIN_DATA, DEV_DATA);
+            frozen_selected_features = frozenset(selected_features);
+            if frozen_selected_features not in dictionary_of_features:
+               dictionary_of_features[frozen_selected_features] = 1;
+            else:
+               dictionary_of_features[frozen_selected_features] = dictionary_of_features[frozen_selected_features] + 1;
+            
+            print('.', end='', flush=True);
+        
+        for key, value in sorted(dictionary_of_features.items(), key=lambda x:x[1], reverse=True):
+            print("\nBest selected features are " , key);
+            return key, habitable_planets, non_habitable_planets;
+    
+    except ValueError:
+        print('Error reading file');
+        raise;
 
 def test_features():                                       
     try:
-        habitable_planets , non_habitable_planets = load_planets_data();        
-        best_features = forward_search_features(habitable_planets, non_habitable_planets, TRAIN_DATA, DEV_DATA);
+        best_features, habitable_planets, non_habitable_planets = find_best_features();
         g_test_error = 0;
         num_of_test_iterations = 200;
+        print('Testing features ', best_features, " on test data");
         for i in range(num_of_test_iterations):
             np.random.shuffle(habitable_planets);
             np.random.shuffle(non_habitable_planets);        
@@ -142,26 +166,24 @@ def test_features():
             test_slice = 1.0 - train_slice;
             test_error = get_test_error(habitable_planets, non_habitable_planets, best_features, train_slice, test_slice);
         
-            print('Test error on trained data with features ' , best_features ,' is ', test_error);
             g_test_error = g_test_error + test_error;
+            print('.', end='', flush=True);
         
-        print('Average test error on trained data is ', g_test_error/num_of_test_iterations);
+        print('\nAverage test error on test data is ', g_test_error/num_of_test_iterations);
         
     
     except ValueError:
         print('Error reading file');
         raise;
         
-def get_trained_model():    
-     habitable_planets , non_habitable_planets = load_planets_data();
-     
-     features = forward_search_features(habitable_planets, non_habitable_planets, TRAIN_DATA, DEV_DATA);
+def get_trained_model():  
+     best_features, habitable_planets,non_habitable_planets  = find_best_features();
 
      habitable_slice_features = np.ones(habitable_planets.shape[0]);    
      non_habitable_slice_features = np.full(non_habitable_planets.shape[0], -1);
      
-     habitable_slice_features = select_features(habitable_planets, habitable_slice_features, features);
-     non_habitable_slice_features = select_features(non_habitable_planets, non_habitable_slice_features, features);
+     habitable_slice_features = select_features(habitable_planets, habitable_slice_features, best_features);
+     non_habitable_slice_features = select_features(non_habitable_planets, non_habitable_slice_features, best_features);
      
      X_train = np.vstack((habitable_slice_features[:,1:], non_habitable_slice_features[:,1:])) ;
      Y_train = np.append(habitable_slice_features[:,0], non_habitable_slice_features[:,0]);
@@ -169,7 +191,7 @@ def get_trained_model():
      clf = svm.SVC(kernel='rbf', gamma=10)
      clf.fit(X_train, Y_train);
      
-     return clf, features;
+     return clf, best_features;
  
 def predict_on_new_kepler_data(kepler_data_file):
     clf, features = get_trained_model();
@@ -185,7 +207,8 @@ def predict_on_new_kepler_data(kepler_data_file):
         if y_predicated[i] > 0:
             habitable_planet_koi = planets_from_kepler[i]["kepoi_name"].decode("utf-8");
             planet_temperature = planets_from_kepler[i]["koi_teq"];
-            print('Predicted Habitable planet koi = ',habitable_planet_koi, " Equilibrium Temperature in celcius = ", planet_temperature - 273.15);        
+            planet_radius = planets_from_kepler[i]["koi_prad"];
+            print('Predicted Habitable planet koi = ',habitable_planet_koi, ", Equilibrium Surface Temperature in Celcius = ", planet_temperature - 273.15, ", Planet radius (Earth) = ", planet_radius);        
 
 def main():
     if len(sys.argv) > 1:
