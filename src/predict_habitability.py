@@ -13,7 +13,6 @@ DEV_DATA = 0.2;
 BEST_FEATURE_SELECTION_LOOP_COUNT=30;
 
 #Index is 0 based
-
 # Planetary and Stellar parameters    
 planetary_stellar_parameter_indexes = (2,   # kepoi_name:      KOI Name
                                        15,  # koi period,      Orbital Period [days]
@@ -80,9 +79,9 @@ def do_svm(X_train, Y_train, X_predict):
     y_predicted = clf.predict(X_predict);
     return y_predicted;
 
-def get_test_error(habitable_planets, non_habitable_planets, features, train_slice, test_slice):
-    X_train, Y_train = get_X_Y(habitable_planets, non_habitable_planets, features, 0.0, train_slice);
-    X_dev, Y_dev = get_X_Y(habitable_planets, non_habitable_planets, features, train_slice, test_slice);
+def get_test_error(habitable_planets, non_habitable_planets, features, start_train, train_width, start_test, test_width):
+    X_train, Y_train = get_X_Y(habitable_planets, non_habitable_planets, features, start_train, train_width);
+    X_dev, Y_dev = get_X_Y(habitable_planets, non_habitable_planets, features, start_test, test_width);
                 
     y_predicted = do_svm(X_train, Y_train, X_dev);        
     result = y_predicted * Y_dev;
@@ -91,7 +90,7 @@ def get_test_error(habitable_planets, non_habitable_planets, features, train_sli
     
     return error;    
     
-def forward_search_features (habitable, non_habitable, train_slice, dev_slice):
+def forward_search_features (habitable, non_habitable, start_train, train_width, start_test, test_width):
     selected_features = set([]);
     previous_min_error = 0;
     for i in planetary_stellar_parameter_cols:
@@ -102,7 +101,7 @@ def forward_search_features (habitable, non_habitable, train_slice, dev_slice):
                 tmp_selected_features = set(selected_features);
                 tmp_selected_features.add(j);
                 
-                error = get_test_error(habitable, non_habitable, tmp_selected_features, train_slice, dev_slice);
+                error = get_test_error(habitable, non_habitable, tmp_selected_features, start_train, train_width, start_test, test_width);
                 
                 if error < min_error:
                     min_index = j;
@@ -134,7 +133,7 @@ def find_best_features():
         for j in range(BEST_FEATURE_SELECTION_LOOP_COUNT):
             np.random.shuffle(habitable_planets);
             np.random.shuffle(non_habitable_planets);        
-            selected_features = forward_search_features(habitable_planets, non_habitable_planets, TRAIN_DATA, DEV_DATA);
+            selected_features = forward_search_features(habitable_planets, non_habitable_planets, 0.0, TRAIN_DATA, TRAIN_DATA, DEV_DATA);
             frozen_selected_features = frozenset(selected_features);
             if frozen_selected_features not in dictionary_of_features:
                dictionary_of_features[frozen_selected_features] = 1;
@@ -164,14 +163,17 @@ def test_features():
             #now train on larger slice (train+dev) with given feature and run test on remaining data
             train_slice = TRAIN_DATA + DEV_DATA;
             test_slice = 1.0 - train_slice;
-            test_error = get_test_error(habitable_planets, non_habitable_planets, best_features, train_slice, test_slice);
+            test_error = get_test_error(habitable_planets, non_habitable_planets, best_features, 0.0, train_slice, train_slice, test_slice);
         
             g_test_error = g_test_error + test_error;
             print('.', end='', flush=True);
         
         print('\nAverage test error on test data is ', g_test_error/num_of_test_iterations);
         
-    
+        # error on train data
+        train_error = get_test_error(habitable_planets, non_habitable_planets, best_features, 0.0, 1.0, 0.0, 1.0);
+        print('Error on training data is ', train_error);
+         
     except ValueError:
         print('Error reading file');
         raise;
@@ -210,6 +212,24 @@ def predict_on_new_kepler_data(kepler_data_file):
             planet_radius = planets_from_kepler[i]["koi_prad"];
             print('Predicted Habitable planet koi = ',habitable_planet_koi, ", Equilibrium Surface Temperature in Celcius = ", planet_temperature - 273.15, ", Planet radius (Earth) = ", planet_radius);        
 
+'''
+This program could be called either with no argument
+or data file with all columns generated from Kepler's KOI table
+ 
+https://exoplanetarchive.ipac.caltech.edu/cgi-bin/TblView/nph-tblView?app=ExoTbls&config=cumulative
+
+The first line of data file needs to be column names.
+
+One example of how to run this is
+
+python predict_habitability.py  ../data/cumulative_test.csv
+
+In this case, it prints KOI of all planets which it has
+identified as potentially habitable.
+
+If this is called without any argument, it just finds best feature from
+training/dev data and reports the error on traing and test data.
+'''
 def main():
     if len(sys.argv) > 1:
         kepler_data_file = sys.argv[1];
