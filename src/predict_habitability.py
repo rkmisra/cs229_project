@@ -6,11 +6,12 @@
 
 import sys
 import numpy as np
-from sklearn import svm         
+from sklearn import svm  
+import matplotlib.pyplot as plt       
 
 TRAIN_DATA = 0.5;
 DEV_DATA = 0.2;
-BEST_FEATURE_SELECTION_LOOP_COUNT=30;
+BEST_FEATURE_SELECTION_LOOP_COUNT=50
 
 #Index is 0 based
 # Planetary and Stellar parameters    
@@ -46,6 +47,26 @@ planetary_stellar_parameter_cols = (   "koi_period",    # koi_period       Orbit
                                        "koi_srad",      # koi_srad:        Stellar Radius [Solar radii]
                                        "koi_smass"      # koi_smass:       Stellar Mass [Solar mass]
                                        );
+planetary_stellar_parameter_cols_dict = {   "koi_period":   "Orbital Period",
+                                       "koi_ror":     "Planet-Star Radius Ratio",
+                                       "koi_srho":      "Fitted Stellar Density",
+                                       "koi_prad":     "Planetary Radius",
+                                       "koi_sma":      "Orbit Semi-Major Axis",
+                                       "koi_teq":       "Equilibrium Temperature",
+                                       "koi_insol":     "Insolation Flux",
+                                       "koi_dor":       "Planet-Star Distance over Star Radius",
+                                       "koi_count":     "Number of Planet" ,
+                                       "koi_steff":     "Stellar Effective Temperature" ,
+                                       "koi_slogg":     "Stellar Surface Gravity",
+                                       "koi_smet":      "Stellar Metallicity",
+                                       "koi_srad":      "Stellar Radius",
+                                       "koi_smass":      "Stellar Mass"
+                                       };
+                                
+                                
+
+def get_svm():
+    return svm.SVC(kernel='rbf', gamma=10, class_weight = 'balanced')
 
 def select_features(from_data, to_data, feature_indexes):
     for i in feature_indexes:
@@ -73,7 +94,7 @@ def get_X_Y(habitable, non_habitable, feature_indexes, start, width):
     return X, Y;
 
 def do_svm(X_train, Y_train, X_predict):
-    clf = svm.SVC(kernel='rbf', gamma=10)
+    clf = get_svm()
     clf.fit(X_train, Y_train)
         
     y_predicted = clf.predict(X_predict);
@@ -120,8 +141,8 @@ def load_planets_data():
         
     non_habitable_planets = np.genfromtxt('../data/non_habitable_planets_confirmed_detailed_list.csv', filling_values = 0, names = True, dtype=None, delimiter=",",usecols=planetary_stellar_parameter_indexes);
     
-    np.random.shuffle(habitable_planets);
-    np.random.shuffle(non_habitable_planets);        
+    np.random.shuffle(habitable_planets)
+    np.random.shuffle(non_habitable_planets)        
 
     return habitable_planets, non_habitable_planets;
 
@@ -131,8 +152,13 @@ def find_best_features():
         dictionary_of_features = dict();
         habitable_planets , non_habitable_planets = load_planets_data(); 
         for j in range(BEST_FEATURE_SELECTION_LOOP_COUNT):
-            np.random.shuffle(habitable_planets);
-            np.random.shuffle(non_habitable_planets);        
+            habitable_size = len(habitable_planets);
+            non_habitable_size = len(non_habitable_planets);
+
+            #only resuffule train/dev set  
+            np.random.shuffle(habitable_planets[0: int(habitable_size * (TRAIN_DATA + DEV_DATA))])
+            np.random.shuffle(non_habitable_planets[0:int(non_habitable_size * (TRAIN_DATA + DEV_DATA))])        
+            
             selected_features = forward_search_features(habitable_planets, non_habitable_planets, 0.0, TRAIN_DATA, TRAIN_DATA, DEV_DATA);
             frozen_selected_features = frozenset(selected_features);
             if frozen_selected_features not in dictionary_of_features:
@@ -141,10 +167,61 @@ def find_best_features():
                dictionary_of_features[frozen_selected_features] = dictionary_of_features[frozen_selected_features] + 1;
             
             print('.', end='', flush=True);
-        
+
+        # select top 4 set
+        TOP_NUMBER_OF_FEATURES = 5
+        index = 0;
+        high_frequency_found = False;
+        min_dev_error = 0;
+        best_feature_set = []
+        fig = plt.figure()
+        ax = fig.add_subplot(111)
         for key, value in sorted(dictionary_of_features.items(), key=lambda x:x[1], reverse=True):
-            print("\nBest selected features are " , key);
-            return key, habitable_planets, non_habitable_planets;
+            if index == TOP_NUMBER_OF_FEATURES:
+                break;
+            index +=1
+            
+            dev_error = get_test_error(habitable_planets, non_habitable_planets, key, 0.0, TRAIN_DATA, TRAIN_DATA, DEV_DATA)
+            print("\nFeature set = ", key , " number of times selected = ", value, " and dev set error ", dev_error);
+            feature_label = []
+            for feature in key:
+                feature_label.append(planetary_stellar_parameter_cols_dict[feature])
+            ax.scatter(dev_error, value, label=feature_label)
+            # best feature is which is selected at least 15% of time of BEST_FEATURE_SELECTION_LOOP_COUNT (default = 30)
+            # and with lowest dev error, otherwise simply lowest dev_error 
+            if value >= BEST_FEATURE_SELECTION_LOOP_COUNT * 0.15:
+                if high_frequency_found == False:
+                        best_feature_set = key
+                        min_dev_error = dev_error
+                        high_frequency_found = True
+                elif dev_error < min_dev_error:
+                        best_feature_set = key
+                        min_dev_error = dev_error
+            elif high_frequency_found == False:
+                    if dev_error < min_dev_error:
+                        best_feature_set = key
+                        min_dev_error = dev_error
+        
+        Y_annotate = dictionary_of_features[best_feature_set]
+        X_annotate = min_dev_error
+        
+        ax.set_xlim([0, 20])
+        ax.set_ylim([0, 30])
+        best_feature_label = ""
+        for feature in best_feature_set:
+                best_feature_label += " {" + planetary_stellar_parameter_cols_dict[feature] + "} "
+                
+        ax.annotate('Feature selected = ' + best_feature_label, xy = (X_annotate, Y_annotate), xytext = (X_annotate + 2, Y_annotate + 2), 
+                     arrowprops=dict(facecolor='black', shrink=0.05),)
+           
+        ax.legend(bbox_to_anchor=(0., 1.02, 1., .102), loc=3,
+           mode="expand", borderaxespad=0.)
+        plt.xlabel('% Dev set error with selected feature')
+        plt.ylabel('Number of times feature selected')
+        plt.show()
+        
+        print("\nBest selected features are " , best_feature_set)
+        return best_feature_set, habitable_planets, non_habitable_planets;
     
     except ValueError:
         print('Error reading file');
@@ -153,26 +230,18 @@ def find_best_features():
 def test_features():                                       
     try:
         best_features, habitable_planets, non_habitable_planets = find_best_features();
-        g_test_error = 0;
-        num_of_test_iterations = 200;
-        print('Testing features ', best_features, " on test data");
-        for i in range(num_of_test_iterations):
-            np.random.shuffle(habitable_planets);
-            np.random.shuffle(non_habitable_planets);        
-
-            #now train on larger slice (train+dev) with given feature and run test on remaining data
-            train_slice = TRAIN_DATA + DEV_DATA;
-            test_slice = 1.0 - train_slice;
-            test_error = get_test_error(habitable_planets, non_habitable_planets, best_features, 0.0, train_slice, train_slice, test_slice);
         
-            g_test_error = g_test_error + test_error;
-            print('.', end='', flush=True);
-        
-        print('\nAverage test error on test data is ', g_test_error/num_of_test_iterations);
+        #error on test data
+        test_error = get_test_error(habitable_planets, non_habitable_planets, best_features, 0.0, TRAIN_DATA, TRAIN_DATA + DEV_DATA, 1.0);
+        print('\ntest error on test data is ', test_error);
         
         # error on train data
-        train_error = get_test_error(habitable_planets, non_habitable_planets, best_features, 0.0, 1.0, 0.0, 1.0);
+        train_error = get_test_error(habitable_planets, non_habitable_planets, best_features, 0.0, TRAIN_DATA, 0.0, TRAIN_DATA);
         print('Error on training data is ', train_error);
+
+        # error on dev data
+        dev_error = get_test_error(habitable_planets, non_habitable_planets, best_features,  0.0, TRAIN_DATA, TRAIN_DATA, DEV_DATA);
+        print('Error on dev data is ', dev_error);
          
     except ValueError:
         print('Error reading file');
@@ -190,7 +259,7 @@ def get_trained_model():
      X_train = np.vstack((habitable_slice_features[:,1:], non_habitable_slice_features[:,1:])) ;
      Y_train = np.append(habitable_slice_features[:,0], non_habitable_slice_features[:,0]);
      
-     clf = svm.SVC(kernel='rbf', gamma=10)
+     clf = get_svm()
      clf.fit(X_train, Y_train);
      
      return clf, best_features;
@@ -205,12 +274,28 @@ def predict_on_new_kepler_data(kepler_data_file):
     
     y_predicated = clf.predict(X_data);
     
+    X_distance_from_parent_star = []
+    Y_surface_temprature = []
+    S_planet_radius = []
+    colors = []
+    color_space = 255*255*255
+    
     for i in range(len(y_predicated)):
         if y_predicated[i] > 0:
             habitable_planet_koi = planets_from_kepler[i]["kepoi_name"].decode("utf-8");
-            planet_temperature = planets_from_kepler[i]["koi_teq"];
+            planet_temperature = planets_from_kepler[i]["koi_teq"] - 273.15;
             planet_radius = planets_from_kepler[i]["koi_prad"];
-            print('Predicted Habitable planet koi = ',habitable_planet_koi, ", Equilibrium Surface Temperature in Celcius = ", planet_temperature - 273.15, ", Planet radius (Earth) = ", planet_radius);        
+            planet_star_distance = planets_from_kepler[i]["koi_dor"]
+            print('Predicted Habitable planet koi = ',habitable_planet_koi, ", Equilibrium Surface Temperature in Celcius = ", planet_temperature, ", Planet radius (Earth) = ", planet_radius);        
+            X_distance_from_parent_star.append(planet_star_distance)
+            Y_surface_temprature.append(planet_temperature)
+            S_planet_radius.append(planet_radius)
+            colors.append(np.random.randint(color_space))
+    
+    plt.scatter(X_distance_from_parent_star, Y_surface_temprature, s = S_planet_radius, c = colors)
+    plt.xlabel('Distance from parent star')
+    plt.ylabel('Planet surface temprature in celcius')
+    plt.show()
 
 '''
 This program could be called either with no argument
@@ -228,7 +313,7 @@ In this case, it prints KOI of all planets which it has
 identified as potentially habitable.
 
 If this is called without any argument, it just finds best feature from
-training/dev data and reports the error on traing and test data.
+training/dev data and reports the error on training and test data.
 '''
 def main():
     if len(sys.argv) > 1:
