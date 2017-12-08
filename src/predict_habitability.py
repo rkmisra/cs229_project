@@ -5,13 +5,15 @@
 """
 
 import sys
+import itertools
 import numpy as np
-from sklearn import svm  
+from sklearn import svm
+from sklearn.metrics import confusion_matrix  
 import matplotlib.pyplot as plt       
 
 TRAIN_DATA = 0.5;
 DEV_DATA = 0.2;
-BEST_FEATURE_SELECTION_LOOP_COUNT=50
+BEST_FEATURE_SELECTION_LOOP_COUNT=10
 
 #Index is 0 based
 # Planetary and Stellar parameters    
@@ -66,7 +68,7 @@ planetary_stellar_parameter_cols_dict = {   "koi_period":   "Orbital Period",
                                 
 
 def get_svm():
-    return svm.SVC(kernel='rbf', gamma=10, class_weight = 'balanced')
+    return svm.SVC(kernel='rbf', gamma=10, class_weight = 'balanced', C=1)
 
 def select_features(from_data, to_data, feature_indexes):
     for i in feature_indexes:
@@ -100,16 +102,41 @@ def do_svm(X_train, Y_train, X_predict):
     y_predicted = clf.predict(X_predict);
     return y_predicted;
 
+def draw_confusion_matrix(y_predicted, Y_actual, title):
+    cm = confusion_matrix(Y_actual, y_predicted)
+    
+    plt.figure()
+    plt.imshow(cm, cmap=plt.cm.ocean)
+    plt.title("Confusion matrix " + title)
+    plt.colorbar()
+    classes = ("non habitable", "habitable")
+    tick_marks = np.arange(len(classes))
+    plt.xticks(tick_marks, classes, rotation=45)
+    plt.yticks(tick_marks, classes)
+    
+    for i, j in itertools.product(range(cm.shape[0]), range(cm.shape[1])):
+        plt.text(j, i, format(cm[i, j], 'd'),
+                 horizontalalignment="center",
+                 color="black")
+
+    plt.tight_layout()
+    plt.ylabel('True label')
+    plt.xlabel('Predicted label')
+    plt.show()
+    
+    
 def get_test_error(habitable_planets, non_habitable_planets, features, start_train, train_width, start_test, test_width):
     X_train, Y_train = get_X_Y(habitable_planets, non_habitable_planets, features, start_train, train_width);
     X_dev, Y_dev = get_X_Y(habitable_planets, non_habitable_planets, features, start_test, test_width);
                 
     y_predicted = do_svm(X_train, Y_train, X_dev);        
     result = y_predicted * Y_dev;
-        
+    
+    if draw_confusion_matrix == True:
+        draw_confusion_matrix(y_predicted, Y_dev)    
     error = (sum(1 for i in result if i <= 0)/len(Y_dev))*100;
     
-    return error;    
+    return error, y_predicted, Y_dev;    
     
 def forward_search_features (habitable, non_habitable, start_train, train_width, start_test, test_width):
     selected_features = set([]);
@@ -122,7 +149,7 @@ def forward_search_features (habitable, non_habitable, start_train, train_width,
                 tmp_selected_features = set(selected_features);
                 tmp_selected_features.add(j);
                 
-                error = get_test_error(habitable, non_habitable, tmp_selected_features, start_train, train_width, start_test, test_width);
+                error,_,_ = get_test_error(habitable, non_habitable, tmp_selected_features, start_train, train_width, start_test, test_width);
                 
                 if error < min_error:
                     min_index = j;
@@ -171,8 +198,7 @@ def find_best_features():
         # select top 4 set
         TOP_NUMBER_OF_FEATURES = 5
         index = 0;
-        high_frequency_found = False;
-        min_dev_error = 0;
+        min_dev_error = 100;
         best_feature_set = []
         fig = plt.figure()
         ax = fig.add_subplot(111)
@@ -181,35 +207,25 @@ def find_best_features():
                 break;
             index +=1
             
-            dev_error = get_test_error(habitable_planets, non_habitable_planets, key, 0.0, TRAIN_DATA, TRAIN_DATA, DEV_DATA)
-            print("\nFeature set = ", key , " number of times selected = ", value, " and dev set error ", dev_error);
+            dev_error,_,_ = get_test_error(habitable_planets, non_habitable_planets, key, 0.0, TRAIN_DATA, TRAIN_DATA, DEV_DATA)
+#            print("\nFeature set = ", key , " number of times selected = ", value, " and dev set error ", dev_error);
             feature_label = []
             for feature in key:
                 feature_label.append(planetary_stellar_parameter_cols_dict[feature])
             ax.scatter(dev_error, value, label=feature_label)
-            # best feature is which is selected at least 15% of time of BEST_FEATURE_SELECTION_LOOP_COUNT (default = 30)
-            # and with lowest dev error, otherwise simply lowest dev_error 
-            if value >= BEST_FEATURE_SELECTION_LOOP_COUNT * 0.15:
-                if high_frequency_found == False:
-                        best_feature_set = key
-                        min_dev_error = dev_error
-                        high_frequency_found = True
-                elif dev_error < min_dev_error:
-                        best_feature_set = key
-                        min_dev_error = dev_error
-            elif high_frequency_found == False:
-                    if dev_error < min_dev_error:
-                        best_feature_set = key
-                        min_dev_error = dev_error
+            if dev_error < min_dev_error:
+                 best_feature_set = key
+                 min_dev_error = dev_error
         
         Y_annotate = dictionary_of_features[best_feature_set]
         X_annotate = min_dev_error
         
         ax.set_xlim([0, 20])
-        ax.set_ylim([0, 30])
-        best_feature_label = ""
+        ax.set_ylim([0, BEST_FEATURE_SELECTION_LOOP_COUNT])
+        best_feature_label = "{"
         for feature in best_feature_set:
                 best_feature_label += " {" + planetary_stellar_parameter_cols_dict[feature] + "} "
+        best_feature_label += "}"
                 
         ax.annotate('Feature selected = ' + best_feature_label, xy = (X_annotate, Y_annotate), xytext = (X_annotate + 2, Y_annotate + 2), 
                      arrowprops=dict(facecolor='black', shrink=0.05),)
@@ -232,15 +248,16 @@ def test_features():
         best_features, habitable_planets, non_habitable_planets = find_best_features();
         
         #error on test data
-        test_error = get_test_error(habitable_planets, non_habitable_planets, best_features, 0.0, TRAIN_DATA, TRAIN_DATA + DEV_DATA, 1.0);
+        test_error, y_predicted, y_actual = get_test_error(habitable_planets, non_habitable_planets, best_features, 0.0, TRAIN_DATA, TRAIN_DATA + DEV_DATA, 1.0);
+        draw_confusion_matrix(y_predicted, y_actual , "for test data")
         print('\ntest error on test data is ', test_error);
         
         # error on train data
-        train_error = get_test_error(habitable_planets, non_habitable_planets, best_features, 0.0, TRAIN_DATA, 0.0, TRAIN_DATA);
+        train_error, y_predicted, y_actual = get_test_error(habitable_planets, non_habitable_planets, best_features, 0.0, TRAIN_DATA, 0.0, TRAIN_DATA);
         print('Error on training data is ', train_error);
 
         # error on dev data
-        dev_error = get_test_error(habitable_planets, non_habitable_planets, best_features,  0.0, TRAIN_DATA, TRAIN_DATA, DEV_DATA);
+        dev_error, y_predicted, y_actual = get_test_error(habitable_planets, non_habitable_planets, best_features,  0.0, TRAIN_DATA, TRAIN_DATA, DEV_DATA);
         print('Error on dev data is ', dev_error);
          
     except ValueError:
@@ -280,21 +297,37 @@ def predict_on_new_kepler_data(kepler_data_file):
     colors = []
     color_space = 255*255*255
     
+    total_distance = 0
+    total_temperature = 0
+    number_of_habitable_planets = 0
     for i in range(len(y_predicated)):
         if y_predicated[i] > 0:
-            habitable_planet_koi = planets_from_kepler[i]["kepoi_name"].decode("utf-8");
-            planet_temperature = planets_from_kepler[i]["koi_teq"] - 273.15;
+            habitable_planet_koi = planets_from_kepler[i]["kepoi_name"].decode("utf-8")
+            planet_temperature = planets_from_kepler[i]["koi_teq"] - 273.15
+            total_temperature += planet_temperature
             planet_radius = planets_from_kepler[i]["koi_prad"];
             planet_star_distance = planets_from_kepler[i]["koi_dor"]
-            print('Predicted Habitable planet koi = ',habitable_planet_koi, ", Equilibrium Surface Temperature in Celcius = ", planet_temperature, ", Planet radius (Earth) = ", planet_radius);        
+            total_distance += planet_star_distance
+            number_of_habitable_planets += 1
+            print('Predicted Habitable planet koi = ',habitable_planet_koi, ", Equilibrium Temperature in Celsius = ", planet_temperature, ", Planet radius (Earth) = ", planet_radius);        
             X_distance_from_parent_star.append(planet_star_distance)
             Y_surface_temprature.append(planet_temperature)
             S_planet_radius.append(planet_radius)
             colors.append(np.random.randint(color_space))
     
+    mean_distance = total_distance/number_of_habitable_planets
+    print('Mean distance of habitable planets ' , mean_distance)
+    var_distance = np.sqrt(np.sum(np.square(X_distance_from_parent_star - mean_distance))/number_of_habitable_planets)
+    print('Standard deviation of distance of habitable planets ' , var_distance)
+    
+    mean_temp = total_temperature/number_of_habitable_planets
+    print('Mean temperature of habitable planets ' , mean_temp)
+    var_temp = np.sqrt(np.sum(np.square(Y_surface_temprature - mean_temp))/number_of_habitable_planets)
+    print('Standard deviation temperature of habitable planets ' , var_temp)
+    
     plt.scatter(X_distance_from_parent_star, Y_surface_temprature, s = S_planet_radius, c = colors)
-    plt.xlabel('Distance from parent star')
-    plt.ylabel('Planet surface temprature in celcius')
+    plt.xlabel('Distance from parent star in the unit of star\'s radius')
+    plt.ylabel('Planetary Equilibrium Temperature in Celsius')
     plt.show()
 
 '''
