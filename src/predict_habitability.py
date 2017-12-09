@@ -66,8 +66,14 @@ planetary_stellar_parameter_cols_dict = {   "koi_period":   "Orbital Period",
                                        "koi_srad":      "Stellar Radius",
                                        "koi_smass":      "Stellar Mass"
                                        };
-
-def get_best_features_thru_removal(X, y):
+'''
+This method takes training X,y and removes
+unnecessary features using Recursive feature
+reduction with cross validation and returns
+trained SVM with linear kernel
+'''
+def get_linear_svm_kernel_with_feature_reduction(X, y):
+    print('Running recursive feature elimination with cross validation with linear SVM')
     svc = svm.SVC(kernel='linear', class_weight = 'balanced')
     rfecv = RFECV(estimator=svc, step=1, cv=StratifiedKFold(5),
               scoring='accuracy')
@@ -76,16 +82,22 @@ def get_best_features_thru_removal(X, y):
     print("Optimal number of features : %d" % rfecv.n_features_)
     return rfecv
 
+'''
+This method test how linear kernel
+with feature reduction performs on
+unseen test data.
+'''
 def test_feature_reduction():
-    habitable_planets , non_habitable_planets = load_planets_data()
+    print('Training model on test data with feature elimination and validating it on test data')
+    habitable_planets , non_habitable_planets = load_training_planets_data()
     X_train, Y_train = get_X_Y(habitable_planets, non_habitable_planets, planetary_stellar_parameter_cols, 0, 0.7)
     
     X_test, Y_test = get_X_Y(habitable_planets, non_habitable_planets, planetary_stellar_parameter_cols, 0.7, 0.3)
     
-    clf = get_best_features_thru_removal(X_train, Y_train)
+    clf = get_linear_svm_kernel_with_feature_reduction(X_train, Y_train)
     
     Y_predict = clf.predict(X_test)
-    draw_confusion_matrix(Y_predict, Y_test, "test feature reduction")    
+    draw_confusion_matrix(Y_predict, Y_test, "feature elimination")    
 
     result = Y_predict * Y_test;
     error = (sum(1 for i in result if i <= 0)/len(Y_test))*100;
@@ -108,7 +120,12 @@ def select_features(from_data, to_data, feature_indexes):
         to_data = np.column_stack((to_data, from_data[i]));
         
     return to_data;    
-                                    
+
+'''
+Given planet's data and indexes of features, it 
+extracts features from data with all features,
+and adds y = (-1, 1) and returns X,y
+'''                                    
 def get_X_Y(habitable, non_habitable, feature_indexes, start, width):
     
     habitable_size = len(habitable);
@@ -135,6 +152,11 @@ def do_svm(X_train, Y_train, X_predict):
     y_predicted = clf.predict(X_predict);
     return y_predicted;
 
+'''
+Draws a simple confusion matrix with X axis
+predicted habitable and non habitable planets
+and Y axis with true labels.
+'''
 def draw_confusion_matrix(y_predicted, Y_actual, title):
     cm = confusion_matrix(Y_actual, y_predicted)
     
@@ -157,7 +179,11 @@ def draw_confusion_matrix(y_predicted, Y_actual, title):
     plt.xlabel('Predicted label')
     plt.show()
     
-    
+'''
+This is wrapper method to do train data and do test
+on given test data.  Test data could be dev data or
+actual test data.
+'''    
 def get_test_error(habitable_planets, non_habitable_planets, features, start_train, train_width, start_test, test_width):
     X_train, Y_train = get_X_Y(habitable_planets, non_habitable_planets, features, start_train, train_width);
     X_dev, Y_dev = get_X_Y(habitable_planets, non_habitable_planets, features, start_test, test_width);
@@ -168,7 +194,12 @@ def get_test_error(habitable_planets, non_habitable_planets, features, start_tra
     error = (sum(1 for i in result if i <= 0)/len(Y_dev))*100;
     
     return error, y_predicted, Y_dev;    
-    
+
+'''
+This method implements forward search of features.  It adds 
+one feature at a time and selects feature with lowest
+dev error
+'''    
 def forward_search_features (habitable, non_habitable, start_train, train_width, start_test, test_width):
     selected_features = set([]);
     previous_min_error = 0;
@@ -194,9 +225,8 @@ def forward_search_features (habitable, non_habitable, start_train, train_width,
     
     return selected_features;
 
-def load_planets_data():
+def load_training_planets_data():
     habitable_planets = np.genfromtxt('../data/habitable_planets_detailed_list.csv',filling_values = 0, names=True, dtype=None, delimiter=",",usecols=planetary_stellar_parameter_indexes);
-        
     non_habitable_planets = np.genfromtxt('../data/non_habitable_planets_confirmed_detailed_list.csv', filling_values = 0, names = True, dtype=None, delimiter=",",usecols=planetary_stellar_parameter_indexes);
     
     np.random.shuffle(habitable_planets)
@@ -204,12 +234,25 @@ def load_planets_data():
 
     return habitable_planets, non_habitable_planets;
 
+'''
+This tries to find the features which represent lowest
+overall dev error. Distribution of data sometimes
+determine which features are selected. To avoid
+relying on result of one particular data, multiple
+iteration of logic is performed, each time
+reshuffling train and dev data (test data is never 
+touched) and at the end find feature which lowest
+dev error.  This is probably not the perfect logic
+as it might introduce a feature set overfitting to 
+one set of dev data that gave lowest error and
+may not represent larger section of data.
+'''
 def find_best_features():
     try:
         print("Selecting best features");
     
         dictionary_of_features = dict();
-        habitable_planets , non_habitable_planets = load_planets_data(); 
+        habitable_planets , non_habitable_planets = load_training_planets_data(); 
         
         for j in range(BEST_FEATURE_SELECTION_LOOP_COUNT):
             habitable_size = len(habitable_planets);
@@ -226,7 +269,6 @@ def find_best_features():
             else:
                dictionary_of_features[frozen_selected_features] = dictionary_of_features[frozen_selected_features] + 1;
             
-            print('Selected feature ',frozen_selected_features)
             print('.', end='', flush=True);
 
         # select top 4 set
@@ -242,7 +284,7 @@ def find_best_features():
             index +=1
             
             dev_error,_,_ = get_test_error(habitable_planets, non_habitable_planets, key, 0.0, TRAIN_DATA, TRAIN_DATA, DEV_DATA)
-            print("\nFeature set = ", key , " number of times selected = ", value, " and dev set error ", dev_error);
+#            print("\nFeature set = ", key , " number of times selected = ", value, " and dev set error ", dev_error);
             feature_label = []
             for feature in key:
                 feature_label.append(planetary_stellar_parameter_cols_dict[feature])
@@ -298,8 +340,12 @@ def test_features():
         print('Error reading file');
         raise;
         
-def get_trained_model():  
-     best_features, habitable_planets,non_habitable_planets  = find_best_features();
+def get_trained_model(kernel):
+     if kernel == 'rbf':
+         best_features, habitable_planets,non_habitable_planets  = find_best_features();
+     else:
+         habitable_planets , non_habitable_planets = load_training_planets_data();
+         best_features = planetary_stellar_parameter_cols
 
      habitable_slice_features = np.ones(habitable_planets.shape[0]);    
      non_habitable_slice_features = np.full(non_habitable_planets.shape[0], -1);
@@ -310,31 +356,21 @@ def get_trained_model():
      X_train = np.vstack((habitable_slice_features[:,1:], non_habitable_slice_features[:,1:])) ;
      Y_train = np.append(habitable_slice_features[:,0], non_habitable_slice_features[:,0]);
      
-     clf = get_svm()
-     clf.fit(X_train, Y_train);
+     if kernel == 'rbf':
+         clf = get_svm()
+         clf.fit(X_train, Y_train)
+     else:
+         clf = get_linear_svm_kernel_with_feature_reduction(X_train, Y_train);
      
      return clf, best_features;
 
-def get_trained_model_feature_reduction():      
-     habitable_planets , non_habitable_planets = load_planets_data();
-     habitable_slice_features = np.ones(habitable_planets.shape[0]);    
-     non_habitable_slice_features = np.full(non_habitable_planets.shape[0], -1);
-     
-     habitable_slice_features = select_features(habitable_planets, habitable_slice_features, planetary_stellar_parameter_cols);
-     non_habitable_slice_features = select_features(non_habitable_planets, non_habitable_slice_features, planetary_stellar_parameter_cols);
-     
-     X_train = np.vstack((habitable_slice_features[:,1:], non_habitable_slice_features[:,1:])) ;
-     Y_train = np.append(habitable_slice_features[:,0], non_habitable_slice_features[:,0]);
-     
-     clf = get_best_features_thru_removal(X_train, Y_train);
-     
-     return clf, planetary_stellar_parameter_cols;
- 
+'''
+Method used to train model and later on run that
+trained model on data file generated from 
+Kepler mission's exoplanet archieve
+''' 
 def predict_on_new_kepler_data(kepler_data_file, kernel):
-    if kernel == 'rbf':
-        clf, features = get_trained_model()
-    else:
-        clf, features = get_trained_model_feature_reduction();
+    clf, features = get_trained_model(kernel)
 
     planets_from_kepler = np.genfromtxt(kepler_data_file, filling_values = 0, names=True, dtype=None, delimiter=",",usecols=planetary_stellar_parameter_indexes);
     
@@ -386,7 +422,7 @@ def predict_on_new_kepler_data(kepler_data_file, kernel):
     plt.show()
 
 '''
-This program could be called either with no argument
+This program could be called either with just --kernel = {linear, rbf}
 or data file with all columns generated from Kepler's KOI table
  
 https://exoplanetarchive.ipac.caltech.edu/cgi-bin/TblView/nph-tblView?app=ExoTbls&config=cumulative
@@ -399,9 +435,9 @@ python predict_habitability.py --predict_kepler_file  ../data/cumulative_test.cs
 
 python predict_habitability.py --predict_kepler_file  ../data/cumulative_test.csv --kernel rbf
 
-
 In this case, it prints KOI of all planets which it has
-identified as potentially habitable.
+identified as potentially habitable and scatter plot
+of habitable planets identified.
 
 If this is called without --predict_kepler_file argument, it just finds best feature from
 training/dev data and reports the error on training and test data.
@@ -418,6 +454,7 @@ def main():
     current_args = parser.parse_args()
     kernel =  current_args.kernel
     kepler_data_file = current_args.predict_kepler_file
+    print('This might take few minutes to run')
     if kepler_data_file is not None:
             predict_on_new_kepler_data(kepler_data_file[0], kernel)
     else:
