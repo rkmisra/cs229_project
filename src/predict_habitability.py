@@ -6,8 +6,11 @@
 
 import sys
 import itertools
+import argparse
 import numpy as np
+from sklearn.model_selection import StratifiedKFold
 from sklearn import svm
+from sklearn.feature_selection import RFECV
 from sklearn.metrics import confusion_matrix  
 import matplotlib.pyplot as plt       
 
@@ -63,12 +66,45 @@ planetary_stellar_parameter_cols_dict = {   "koi_period":   "Orbital Period",
                                        "koi_smet":      "Stellar Metallicity",
                                        "koi_srad":      "Stellar Radius",
                                        "koi_smass":      "Stellar Mass"
-                                       };
-                                
+                                       };                                
                                 
 
+
+def get_best_features_thru_removal(X, y):
+    svc = svm.SVC(kernel='linear', class_weight = 'balanced')
+    rfecv = RFECV(estimator=svc, step=1, cv=StratifiedKFold(5),
+              scoring='accuracy')
+    rfecv.fit(X, y)
+
+    print("Optimal number of features : %d" % rfecv.n_features_)
+    return rfecv
+
+def test_feature_reduction():
+    habitable_planets , non_habitable_planets = load_planets_data()
+    X_train, Y_train = get_X_Y(habitable_planets, non_habitable_planets, planetary_stellar_parameter_cols, 0, 0.7)
+    
+    X_test, Y_test = get_X_Y(habitable_planets, non_habitable_planets, planetary_stellar_parameter_cols, 0.7, 0.3)
+    
+    clf = get_best_features_thru_removal(X_train, Y_train)
+    
+    Y_predict = clf.predict(X_test)
+    draw_confusion_matrix(Y_predict, Y_test, "test feature reduction")    
+
+    result = Y_predict * Y_test;
+    error = (sum(1 for i in result if i <= 0)/len(Y_test))*100;
+    
+    print('Test Error ' , error)    
+
+    Y_predict = clf.predict(X_train)
+
+    result = Y_predict * Y_train;
+    error = (sum(1 for i in result if i <= 0)/len(Y_train))*100;
+    
+    print('Training Error ' , error)    
+
+                                         
 def get_svm():
-    return svm.SVC(kernel='rbf', gamma=10, class_weight = 'balanced', C=1)
+    return svm.SVC(kernel='rbf', gamma=10, class_weight = 'balanced')
 
 def select_features(from_data, to_data, feature_indexes):
     for i in feature_indexes:
@@ -132,8 +168,6 @@ def get_test_error(habitable_planets, non_habitable_planets, features, start_tra
     y_predicted = do_svm(X_train, Y_train, X_dev);        
     result = y_predicted * Y_dev;
     
-    if draw_confusion_matrix == True:
-        draw_confusion_matrix(y_predicted, Y_dev)    
     error = (sum(1 for i in result if i <= 0)/len(Y_dev))*100;
     
     return error, y_predicted, Y_dev;    
@@ -176,8 +210,10 @@ def load_planets_data():
 def find_best_features():
     try:
         print("Selecting best features");
+    
         dictionary_of_features = dict();
         habitable_planets , non_habitable_planets = load_planets_data(); 
+        
         for j in range(BEST_FEATURE_SELECTION_LOOP_COUNT):
             habitable_size = len(habitable_planets);
             non_habitable_size = len(non_habitable_planets);
@@ -193,10 +229,11 @@ def find_best_features():
             else:
                dictionary_of_features[frozen_selected_features] = dictionary_of_features[frozen_selected_features] + 1;
             
+            print('Selected feature ',frozen_selected_features)
             print('.', end='', flush=True);
 
         # select top 4 set
-        TOP_NUMBER_OF_FEATURES = 5
+        TOP_NUMBER_OF_FEATURES = 4
         index = 0;
         min_dev_error = 100;
         best_feature_set = []
@@ -208,7 +245,7 @@ def find_best_features():
             index +=1
             
             dev_error,_,_ = get_test_error(habitable_planets, non_habitable_planets, key, 0.0, TRAIN_DATA, TRAIN_DATA, DEV_DATA)
-#            print("\nFeature set = ", key , " number of times selected = ", value, " and dev set error ", dev_error);
+            print("\nFeature set = ", key , " number of times selected = ", value, " and dev set error ", dev_error);
             feature_label = []
             for feature in key:
                 feature_label.append(planetary_stellar_parameter_cols_dict[feature])
@@ -235,7 +272,8 @@ def find_best_features():
         plt.xlabel('% Dev set error with selected feature')
         plt.ylabel('Number of times feature selected')
         plt.show()
-        
+
+       
         print("\nBest selected features are " , best_feature_set)
         return best_feature_set, habitable_planets, non_habitable_planets;
     
@@ -280,9 +318,26 @@ def get_trained_model():
      clf.fit(X_train, Y_train);
      
      return clf, best_features;
+
+def get_trained_model_feature_reduction():      
+     habitable_planets , non_habitable_planets = load_planets_data();
+     habitable_slice_features = np.ones(habitable_planets.shape[0]);    
+     non_habitable_slice_features = np.full(non_habitable_planets.shape[0], -1);
+     
+     habitable_slice_features = select_features(habitable_planets, habitable_slice_features, planetary_stellar_parameter_cols);
+     non_habitable_slice_features = select_features(non_habitable_planets, non_habitable_slice_features, planetary_stellar_parameter_cols);
+     
+     X_train = np.vstack((habitable_slice_features[:,1:], non_habitable_slice_features[:,1:])) ;
+     Y_train = np.append(habitable_slice_features[:,0], non_habitable_slice_features[:,0]);
+     
+     clf = get_best_features_thru_removal(X_train, Y_train);
+     
+     return clf, planetary_stellar_parameter_cols;
  
 def predict_on_new_kepler_data(kepler_data_file):
-    clf, features = get_trained_model();
+#    clf, features = get_trained_model();
+    clf, features = get_trained_model_feature_reduction();
+
     planets_from_kepler = np.genfromtxt(kepler_data_file, filling_values = 0, names=True, dtype=None, delimiter=",",usecols=planetary_stellar_parameter_indexes);
     
     X_data = np.ndarray(shape=(planets_from_kepler.shape[0],0));
@@ -315,6 +370,8 @@ def predict_on_new_kepler_data(kepler_data_file):
             S_planet_radius.append(planet_radius)
             colors.append(np.random.randint(color_space))
     
+    print("features used were ", features)
+    print("Number of habitable planets detected " , number_of_habitable_planets)
     mean_distance = total_distance/number_of_habitable_planets
     print('Mean distance of habitable planets ' , mean_distance)
     var_distance = np.sqrt(np.sum(np.square(X_distance_from_parent_star - mean_distance))/number_of_habitable_planets)
@@ -353,6 +410,8 @@ def main():
         kepler_data_file = sys.argv[1];
         predict_on_new_kepler_data(kepler_data_file);
     else:
-        test_features();
+#        test_features()
+        test_feature_reduction()
+#        get_best_paramater()
 
 main()      
