@@ -4,7 +4,6 @@
 @author: ramisra
 """
 
-import sys
 import itertools
 import argparse
 import numpy as np
@@ -66,9 +65,7 @@ planetary_stellar_parameter_cols_dict = {   "koi_period":   "Orbital Period",
                                        "koi_smet":      "Stellar Metallicity",
                                        "koi_srad":      "Stellar Radius",
                                        "koi_smass":      "Stellar Mass"
-                                       };                                
-                                
-
+                                       };
 
 def get_best_features_thru_removal(X, y):
     svc = svm.SVC(kernel='linear', class_weight = 'balanced')
@@ -272,7 +269,6 @@ def find_best_features():
         plt.xlabel('% Dev set error with selected feature')
         plt.ylabel('Number of times feature selected')
         plt.show()
-
        
         print("\nBest selected features are " , best_feature_set)
         return best_feature_set, habitable_planets, non_habitable_planets;
@@ -334,9 +330,11 @@ def get_trained_model_feature_reduction():
      
      return clf, planetary_stellar_parameter_cols;
  
-def predict_on_new_kepler_data(kepler_data_file):
-#    clf, features = get_trained_model();
-    clf, features = get_trained_model_feature_reduction();
+def predict_on_new_kepler_data(kepler_data_file, kernel):
+    if kernel == 'rbf':
+        clf, features = get_trained_model()
+    else:
+        clf, features = get_trained_model_feature_reduction();
 
     planets_from_kepler = np.genfromtxt(kepler_data_file, filling_values = 0, names=True, dtype=None, delimiter=",",usecols=planetary_stellar_parameter_indexes);
     
@@ -397,21 +395,35 @@ The first line of data file needs to be column names.
 
 One example of how to run this is
 
-python predict_habitability.py  ../data/cumulative_test.csv
+python predict_habitability.py --predict_kepler_file  ../data/cumulative_test.csv --kernel linear
+
+python predict_habitability.py --predict_kepler_file  ../data/cumulative_test.csv --kernel rbf
+
 
 In this case, it prints KOI of all planets which it has
 identified as potentially habitable.
 
-If this is called without any argument, it just finds best feature from
+If this is called without --predict_kepler_file argument, it just finds best feature from
 training/dev data and reports the error on training and test data.
+
+python predict_habitability.py --kernel linear
+python predict_habitability.py --kernel rbf
+
 '''
 def main():
-    if len(sys.argv) > 1:
-        kepler_data_file = sys.argv[1];
-        predict_on_new_kepler_data(kepler_data_file);
+    parser = argparse.ArgumentParser(description='Predict habitability on kepler cumulative data, or test model on training data.')
+    parser.add_argument('--predict_kepler_file', nargs=1, help=' please pass location of kepler cumulative data file. If this argument is not passed a simple training on train data will occur based on kernel type choosen ')
+    parser.add_argument('--kernel', nargs='?',choices=['linear', 'rbf'], required=True, help='Pass kernel as either linear or rbf ')
+        
+    current_args = parser.parse_args()
+    kernel =  current_args.kernel
+    kepler_data_file = current_args.predict_kepler_file
+    if kepler_data_file is not None:
+            predict_on_new_kepler_data(kepler_data_file[0], kernel)
     else:
-#        test_features()
-        test_feature_reduction()
-#        get_best_paramater()
+        if kernel == 'linear':
+            test_feature_reduction()
+        else:
+            test_features()
 
 main()      
