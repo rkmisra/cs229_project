@@ -1,18 +1,21 @@
 function [theta] = main()
   [X_train,Y_train,X_test,Y_test] = load_planets_data('../data/habitable_planets_detailed_list.csv','../data/non_habitable_planets_confirmed_detailed_list.csv','../data/feature_index.csv');
-  %[error] = logistic_regression(X_train,Y_train, X_test, Y_test);
-  [error] = svm(X_train,Y_train, X_test, Y_test);
+  [theta] = logistic_regression(X_train,Y_train);
 
+  fprintf('%f \n', theta);
+  fflush(stdout);
+  
+  [error, Y_predicted] = test_logistic_regression(X_test, Y_test, theta);
+  
   fprintf('Test set error is %d  \n', error*100);
   fflush(stdout);
 
-
-  [error] = svm(X_train,Y_train, X_train, Y_train);
+  [error] = test_logistic_regression(X_train, Y_train, theta);
 
   fprintf('Training error is %d  \n', error*100);
   fflush(stdout);
 
-  [error] = svm(X_train,Y_train, [X_train; X_test], [Y_train; Y_test]);
+  [error] = test_logistic_regression([X_train; X_test], [Y_train; Y_test], theta);
 
   fprintf('Whole data error is %d  \n', error*100);
   fflush(stdout);
@@ -72,7 +75,7 @@ function[X_train, Y_train, X_test, Y_test] = load_planets_data(habitable_planets
   
 end
 
-function[error] = logistic_regression(X, Y, X_test, Y_test)
+function[theta] = logistic_regression(X, Y, X_test, Y_test)
   theta = zeros(size(X, 2), 1);
   learning_rate = 0.01;
   for i = 1:10^7
@@ -91,7 +94,9 @@ function[error] = logistic_regression(X, Y, X_test, Y_test)
      break;
     end
   end
-  
+end
+
+function [error, test_prediction] = test_logistic_regression(X_test, Y_test, theta)
   test_result = 1 ./(1 + exp(-theta' * X_test'));
   test_prediction = ones(size(test_result));
   error = 0;
@@ -107,65 +112,10 @@ function[error] = logistic_regression(X, Y, X_test, Y_test)
       else
       end
     end
-  end  
+  end 
+  error = error/size(test_result,2) 
 end
 
 function[grad] = compute_gradient(X, y, theta)
   grad = (-1 / size(X, 1)) * X' * (y ./(1 + exp((X * theta).* y)));
-end
-
-
-function[error] = svm(Xtrain, ytrain, XTest, ytest)
-    rand ("seed", 123);
-    m_train = size(Xtrain, 1);
-%    ytrain = (2 * trainCategory - 1)';
-%    Xtrain = 1.0 * (Xtrain > 0);
-
-    squared_X_train = sum(Xtrain.^2, 2);
-    gram_train = Xtrain * Xtrain';
-    tau = 8;
-
-    % Get full training matrix for kernels using vectorized code.
-    Ktrain = full(exp(-(repmat(squared_X_train, 1, m_train) ...
-                        + repmat(squared_X_train', m_train, 1) ...
-                        - 2 * gram_train) / (2 * tau^2)));
-
-    lambda = 1 / (64 * m_train);
-    num_outer_loops = 40;
-    alpha = zeros(m_train, 1);
-
-    avg_alpha = zeros(m_train, 1);
-    Imat = eye(m_train);
-
-    count = 0;
-    for ii = 1:(num_outer_loops * m_train)
-      count = count + 1;
-      ind = ceil(rand * m_train);
-      margin = ytrain(ind) * Ktrain(ind, :) * alpha;
-      g = -(margin < 1) * ytrain(ind) * Ktrain(:, ind) + ...
-          m_train * lambda * (Ktrain(:, ind) * alpha(ind));
-      % g(ind) = g(ind) + m_train * lambda * Ktrain(ind,:) * alpha;
-      alpha = alpha - g / sqrt(count);
-      avg_alpha = avg_alpha + alpha;
-    end
-    avg_alpha = avg_alpha / (num_outer_loops * m_train);
-    error = svm_test(m_train, Xtrain, squared_X_train, avg_alpha, tau, XTest, ytest);
-end
-
-function[test_error] = svm_test(m_train, Xtrain, squared_X_train, avg_alpha, tau, Xtest, ytest)
-  squared_X_test = sum(Xtest.^2, 2);
-  m_test = size(Xtest, 1);
-%  ytest = (2 * testCategory - 1)';
-  gram_test = Xtest * Xtrain';
-  Ktest = full(exp(-(repmat(squared_X_test, 1, m_train) ...
-                     + repmat(squared_X_train', m_test, 1) ...
-                     - 2 * gram_test) / (2 * tau^2)));
-
-  % preds = Ktest * alpha;
-
-  % fprintf(1, 'Test error rate for final alpha: %1.4f\n', ...
-  %         sum(preds .* ytest <= 0) / length(ytest));
-
-  preds = Ktest * avg_alpha;
-  test_error = sum(preds .* ytest <= 0) / length(ytest);
 end
